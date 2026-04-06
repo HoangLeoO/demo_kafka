@@ -6,8 +6,8 @@
 #  Run:   docker run -p 8081:8081 demo-kafka
 # ============================================================
 
-# Dùng image Java 17 nhẹ (alpine)
-FROM eclipse-temurin:17-jre-alpine
+# Dùng image Java 17 chuẩn (tránh bản alpine vì hay bị lỗi DNS không tìm thấy hostname 'kafka')
+FROM eclipse-temurin:17-jre
 
 # Thư mục làm việc trong container
 WORKDIR /app
