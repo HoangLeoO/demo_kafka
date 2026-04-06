@@ -93,12 +93,15 @@ pipeline {
                 bat "docker rm   demo-kafka-app 2>nul || exit 0"
 
                 echo '🚀 Khởi động container mới...'
-                // Chạy container:
-                //   -d            → chạy nền (detached)
-                //   --name        → đặt tên container để dễ quản lý
-                //   -p 8081:8081  → map port host:container
-                //   --network host → dùng để container kết nối được Kafka trên localhost:9092
-                bat "docker run -d --name demo-kafka-app -p ${DEPLOY_PORT}:${DEPLOY_PORT} --network host demo-kafka:latest"
+                // Giải thích network:
+                //   Container Spring Boot cần nói chuyện với container Kafka.
+                //   Kafka đang chạy trong network "demo_kafka_default" (do docker-compose tạo).
+                //   → Cho Spring Boot join vào CÙNG network → dùng hostname "kafka:9092" thay vì localhost
+                //
+                //   -p 8081:8081              → vẫn map port ra máy thật để test bằng browser
+                //   --network demo_kafka_default → join cùng network với Kafka
+                //   -e SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092 → kết nối đến Kafka bằng port nội bộ
+                bat "docker run -d --name demo-kafka-app -p ${DEPLOY_PORT}:${DEPLOY_PORT} --network demo_kafka_default -e SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092 demo-kafka:latest"
 
                 echo "✅ Container đang chạy! Truy cập: http://localhost:${DEPLOY_PORT}/api/kafka/send?msg=Test"
             }
