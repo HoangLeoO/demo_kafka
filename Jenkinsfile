@@ -2,36 +2,27 @@
 //  JENKINSFILE - Pipeline CI/CD cho Demo Kafka
 // ============================================================
 //
-//  Pipeline gồm 5 bước:
-//  1. Checkout  → lấy code từ Git
-//  2. Build     → compile + đóng gói thành file .jar
-//  3. Test      → chạy unit test
-//  4. Docker    → build image & push lên Docker Hub (tuỳ chọn)
-//  5. Deploy    → chạy ứng dụng trên server
+//  Pipeline gồm 4 bước:
+//  1. Checkout → lấy code từ Git
+//  2. Build    → compile + đóng gói thành file .jar
+//  3. Test     → chạy unit test
+//  4. Deploy   → chạy ứng dụng trên server
 //
+//  Stage Docker bị TẮT (khi cần thì bật lại - xem bên dưới)
 // ============================================================
 
 pipeline {
 
-    // Chạy pipeline trên bất kỳ agent nào có sẵn
     agent any
 
-    // ── Biến môi trường dùng chung trong pipeline ──────────────
     environment {
         APP_NAME    = 'demo-kafka'
         JAR_NAME    = 'demo_kafka-0.0.1-SNAPSHOT.jar'
         DEPLOY_PORT = '8081'
-
-        // Nếu dùng Docker Hub: thay bằng username của bạn
-        DOCKER_IMAGE = "your-dockerhub-username/${APP_NAME}"
-        DOCKER_TAG   = "${BUILD_NUMBER}"   // Tag = số build (1, 2, 3,...)
     }
 
-    // ── Tuỳ chọn pipeline ──────────────────────────────────────
     options {
-        // Giữ lại tối đa 5 build gần nhất
         buildDiscarder(logRotator(numToKeepStr: '5'))
-        // Timeout toàn bộ pipeline: 20 phút
         timeout(time: 20, unit: 'MINUTES')
     }
 
@@ -43,7 +34,6 @@ pipeline {
         stage('① Checkout') {
             steps {
                 echo '📥 Đang lấy code từ Git...'
-                // Jenkins tự động checkout code từ repo đã cấu hình
                 checkout scm
             }
         }
@@ -54,14 +44,11 @@ pipeline {
         stage('② Build') {
             steps {
                 echo '🔨 Đang build dự án...'
-                // Windows dùng gradlew.bat, Linux/Mac dùng ./gradlew
                 bat 'gradlew.bat clean build -x test'
-                // -x test: bỏ qua test ở bước này (test riêng ở stage sau)
             }
             post {
                 success {
                     echo "✅ Build thành công! File jar: build/libs/${JAR_NAME}"
-                    // Lưu file .jar như artifact của build này
                     archiveArtifacts artifacts: "build/libs/${JAR_NAME}"
                 }
             }
@@ -77,7 +64,6 @@ pipeline {
             }
             post {
                 always {
-                    // Hiển thị kết quả test trên Jenkins UI
                     junit 'build/test-results/test/*.xml'
                 }
                 failure {
@@ -87,59 +73,66 @@ pipeline {
         }
 
         // ──────────────────────────────────────────────────────
-        // STAGE 4: Docker - Build image & Push lên Docker Hub
-        // (Bỏ qua stage này nếu không dùng Docker)
+        // STAGE 4 (TẮT): Docker Build & Push
+        //
+        // ĐỂ BẬT LẠI:
+        //   Bước 1 - Thêm credentials vào Jenkins:
+        //     Manage Jenkins → Credentials → Global → Add Credentials
+        //     Kind     : Username with password
+        //     Username : <docker hub username>
+        //     Password : <docker hub password>
+        //     ID       : dockerhub-credentials
+        //
+        //   Bước 2 - Đổi dòng bên dưới:
+        //     expression { false }  →  expression { true }
         // ──────────────────────────────────────────────────────
         stage('④ Docker Build & Push') {
+            when {
+                expression { false }   // ← đổi thành true để bật
+            }
             steps {
                 echo '🐳 Đang build Docker image...'
-                // Dùng credentials đã lưu trong Jenkins (ID: dockerhub-credentials)
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-credentials',
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    bat "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+                    bat "docker build -t your-dockerhub-username/demo-kafka:${BUILD_NUMBER} ."
                     bat "docker login -u %DOCKER_USER% -p %DOCKER_PASS%"
-                    bat "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
-                    // Cũng tag là latest
-                    bat "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
-                    bat "docker push ${DOCKER_IMAGE}:latest"
+                    bat "docker push your-dockerhub-username/demo-kafka:${BUILD_NUMBER}"
                 }
             }
         }
 
         // ──────────────────────────────────────────────────────
-        // STAGE 5: Deploy - Chạy ứng dụng
+        // STAGE 5: Deploy - Chạy file .jar trên server
         // ──────────────────────────────────────────────────────
         stage('⑤ Deploy') {
             steps {
                 echo '🚀 Đang deploy ứng dụng...'
 
-                // Dừng process cũ đang chạy ở port 8081 (nếu có)
+                // Dừng process cũ ở port 8081 (nếu có)
                 bat """
                     FOR /F "tokens=5" %%a IN ('netstat -aon ^| findstr :${DEPLOY_PORT}') DO (
                         taskkill /F /PID %%a 2>nul
                     )
                 """
 
-                // Chạy file .jar mới ở background
+                // Chạy .jar mới ở background
                 bat "start /B java -jar build/libs/${JAR_NAME} --server.port=${DEPLOY_PORT}"
 
-                echo "✅ Deploy xong! Ứng dụng chạy tại: http://localhost:${DEPLOY_PORT}"
+                echo "✅ Deploy xong! Truy cập: http://localhost:${DEPLOY_PORT}/api/kafka/send?msg=Test"
             }
         }
     }
 
-    // ── Thông báo sau khi pipeline chạy xong ──────────────────
     post {
         success {
             echo """
             ============================================
             ✅ PIPELINE THÀNH CÔNG!
-            App: ${APP_NAME}
-            Build: #${BUILD_NUMBER}
-            URL: http://localhost:${DEPLOY_PORT}/api/kafka/send?msg=Test
+            Build : #${BUILD_NUMBER}
+            URL   : http://localhost:${DEPLOY_PORT}/api/kafka/send?msg=Test
             ============================================
             """
         }
@@ -147,7 +140,6 @@ pipeline {
             echo '❌ PIPELINE THẤT BẠI! Kiểm tra log bên trên.'
         }
         always {
-            // Dọn dẹp workspace sau mỗi build
             cleanWs()
         }
     }
