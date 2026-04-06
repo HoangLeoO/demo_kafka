@@ -88,7 +88,7 @@ pipeline {
         // ──────────────────────────────────────────────────────
         stage('④ Docker Build & Push') {
             when {
-                expression { false }   // ← đổi thành true để bật
+                expression { true }    // ← đang BẬT
             }
             steps {
                 echo '🐳 Đang build Docker image...'
