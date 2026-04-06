@@ -73,55 +73,39 @@ pipeline {
         }
 
         // ──────────────────────────────────────────────────────
-        // STAGE 4 (TẮT): Docker Build & Push
-        //
-        // ĐỂ BẬT LẠI:
-        //   Bước 1 - Thêm credentials vào Jenkins:
-        //     Manage Jenkins → Credentials → Global → Add Credentials
-        //     Kind     : Username with password
-        //     Username : <docker hub username>
-        //     Password : <docker hub password>
-        //     ID       : dockerhub-credentials
-        //
-        //   Bước 2 - Đổi dòng bên dưới:
-        //     expression { false }  →  expression { true }
+        // STAGE 4: Docker Build & Run LOCAL
+        // Không cần credentials, không push lên Docker Hub.
+        // Build image xong → dừng container cũ → chạy container mới.
         // ──────────────────────────────────────────────────────
-        stage('④ Docker Build & Push') {
-            when {
-                expression { true }    // ← đang BẬT
-            }
+        stage('④ Docker Build & Run') {
             steps {
-                echo '🐳 Đang build Docker image...'
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-credentials',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    bat "docker build -t your-dockerhub-username/demo-kafka:${BUILD_NUMBER} ."
-                    bat "docker login -u %DOCKER_USER% -p %DOCKER_PASS%"
-                    bat "docker push your-dockerhub-username/demo-kafka:${BUILD_NUMBER}"
+                echo '🐳 Đang build Docker image (local)...'
+
+                // Build image từ Dockerfile trong repo
+                // Tag: demo-kafka:1, demo-kafka:2,... theo số build
+                bat "docker build -t demo-kafka:${BUILD_NUMBER} ."
+                // Cũng tag là latest để luôn có bản mới nhất
+                bat "docker tag demo-kafka:${BUILD_NUMBER} demo-kafka:latest"
+
+                echo '🛑 Dừng container cũ (nếu đang chạy)...'
+                // Dừng và xóa container cũ - dùng "|| exit 0" để không báo lỗi nếu chưa có
+                bat "docker stop demo-kafka-app 2>nul || exit 0"
+                bat "docker rm   demo-kafka-app 2>nul || exit 0"
+
+                echo '🚀 Khởi động container mới...'
+                // Chạy container:
+                //   -d            → chạy nền (detached)
+                //   --name        → đặt tên container để dễ quản lý
+                //   -p 8081:8081  → map port host:container
+                //   --network host → dùng để container kết nối được Kafka trên localhost:9092
+                bat "docker run -d --name demo-kafka-app -p ${DEPLOY_PORT}:${DEPLOY_PORT} --network host demo-kafka:latest"
+
+                echo "✅ Container đang chạy! Truy cập: http://localhost:${DEPLOY_PORT}/api/kafka/send?msg=Test"
+            }
+            post {
+                failure {
+                    echo '❌ Docker build/run thất bại! Kiểm tra Docker Engine có đang chạy không.'
                 }
-            }
-        }
-
-        // ──────────────────────────────────────────────────────
-        // STAGE 5: Deploy - Chạy file .jar trên server
-        // ──────────────────────────────────────────────────────
-        stage('⑤ Deploy') {
-            steps {
-                echo '🚀 Đang deploy ứng dụng...'
-
-                // Dừng process cũ ở port 8081 (nếu có)
-                bat """
-                    FOR /F "tokens=5" %%a IN ('netstat -aon ^| findstr :${DEPLOY_PORT}') DO (
-                        taskkill /F /PID %%a 2>nul
-                    )
-                """
-
-                // Chạy .jar mới ở background
-                bat "start /B java -jar build/libs/${JAR_NAME} --server.port=${DEPLOY_PORT}"
-
-                echo "✅ Deploy xong! Truy cập: http://localhost:${DEPLOY_PORT}/api/kafka/send?msg=Test"
             }
         }
     }
